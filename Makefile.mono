@@ -1,0 +1,46 @@
+include MakeVars.mono
+
+MAKEDIR:=`pwd`
+
+build: build-base build-examples
+
+build-examples:
+	$(MAKE) -C Examples -f Makefile.mono build
+
+key:
+	[ -f Key.snk ] || sn -k Key.snk
+
+build-base: key
+	$(MAKE) CSFLAGS="/o /keyfile:$(MAKEDIR)/Key.snk" -C IIOPChannel -f Makefile.mono build
+	$(MAKE) CSFLAGS="/o /keyfile:$(MAKEDIR)/Key.snk" -C CLSToIDLGenerator -f Makefile.mono build
+	$(MAKE) CSFLAGS="/o /keyfile:$(MAKEDIR)/Key.snk" -C IDLToCLSCompiler -f Makefile.mono build
+	$(MAKE) CSFLAGS="/o /keyfile:$(MAKEDIR)/Key.snk" -C Utils build -f Makefile.mono
+
+build-base-debug:
+	$(MAKE) CSFLAGS="/debug+ /d:DEBUG /d:TRACE /d:DEBUG_LOGFILE" -C IIOPChannel -f Makefile.mono build
+	$(MAKE) CSFLAGS="/debug+ /d:DEBUG /d:TRACE /d:DEBUG_LOGFILE" -C CLSToIDLGenerator -f Makefile.mono build
+	$(MAKE) CSFLAGS="/debug+ /d:DEBUG /d:TRACE /d:DEBUG_LOGFILE" -C IDLToCLSCompiler -f Makefile.mono build
+	$(MAKE) CSFLAGS="/debug+ /d:DEBUG /d:TRACE /d:DEBUG_LOGFILE" -C Utils build -f Makefile.mono
+
+build-tests: build-base
+	$(MAKE) -C IIOPChannel -f Makefile.mono build-unit-tests
+	$(MAKE) -C IntegrationTests -f Makefile.mono build
+
+clean-base:
+	$(MAKE) -C IIOPChannel -f Makefile.mono clean
+	$(MAKE) -C CLSToIDLGenerator -f Makefile.mono clean
+	$(MAKE) -C IDLToCLSCompiler -f Makefile.mono clean
+	$(MAKE) -C Utils clean -f Makefile.mono
+
+clean: clean-base
+	$(MAKE) -C Examples -f Makefile.mono clean
+	$(MAKE) -C IntegrationTests -f Makefile.mono clean
+
+rebuild-base: clean-base build-base
+
+rebuild-base-debug: clean-base build-base-debug
+
+test:
+	$(MAKE) -C IIOPChannel -f Makefile.mono test
+	$(MAKE) -C IDLToCLSCompiler -f Makefile.mono test
+	$(MAKE) -C IntegrationTests -f Makefile.mono test

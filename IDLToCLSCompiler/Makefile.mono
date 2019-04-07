@@ -1,0 +1,17 @@
+include ../MakeVars.mono
+
+build: 
+
+	$(MAKE) -C IDLPreprocessor -f Makefile.mono build
+	$(MAKE) -C IDLCompiler -f Makefile.mono build
+
+
+test:
+	$(MAKE) -C IDLCompiler -f Makefile.mono test
+
+
+clean:
+
+	$(MAKE) -C IDLPreprocessor -f Makefile.mono clean
+	$(MAKE) -C IDLCompiler -f Makefile.mono clean
+	

@@ -1,0 +1,26 @@
+<?xml version='1.0'?>
+<generatorMappings>
+
+    <mapping>
+        <clsType>System.Collections.ArrayList,mscorlib</clsType>
+        <idlTypeName>java.util.ArrayList</idlTypeName>
+        <idlTypeAssembly>javaCollections</idlTypeAssembly>
+        <idlFile>java\util\ArrayList.idl</idlFile>
+    </mapping>
+
+    <mapping>
+        <clsType>System.Collections.Hashtable,mscorlib</clsType>
+        <idlTypeName>java.util.HashMap</idlTypeName>
+        <idlTypeAssembly>javaCollections</idlTypeAssembly>
+        <idlFile>java\util\HashMap.idl</idlFile>
+    </mapping>
+    <mapping>
+        <clsType>System.DateTime,mscorlib</clsType>
+        <idlTypeName>java.util._Date</idlTypeName>
+        <idlTypeAssembly>javaCollections</idlTypeAssembly>
+        <idlFile>java\util\Date.idl</idlFile>
+    </mapping>    
+
+
+
+</generatorMappings>

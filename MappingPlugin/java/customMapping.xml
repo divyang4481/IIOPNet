@@ -1,0 +1,23 @@
+<?xml version='1.0'?>
+<mappings>
+
+    <mapping>
+        <idlTypeName>java.util.ArrayList</idlTypeName>
+        <idlTypeAssembly>javaCollections</idlTypeAssembly>
+        <clsType>System.Collections.ArrayList,mscorlib</clsType>
+        <customMapper>Ch.Elca.Iiop.JavaCollectionMappers.ArrayListMapper,IIOPNetCustomJavaTypeMapping</customMapper>
+    </mapping>
+    <mapping>
+        <idlTypeName>java.util.HashMap</idlTypeName>
+        <idlTypeAssembly>javaCollections</idlTypeAssembly>
+        <clsType>System.Collections.Hashtable,mscorlib</clsType>
+        <customMapper>Ch.Elca.Iiop.JavaCollectionMappers.HashMapMapper,IIOPNetCustomJavaTypeMapping</customMapper>
+    </mapping>
+    <mapping>
+        <idlTypeName>java.util._Date</idlTypeName>
+        <idlTypeAssembly>javaCollections</idlTypeAssembly>
+        <clsType>System.DateTime,mscorlib</clsType>
+        <customMapper>Ch.Elca.Iiop.JavaCollectionMappers.DateMapper,IIOPNetCustomJavaTypeMapping</customMapper>
+    </mapping>    
+
+</mappings>

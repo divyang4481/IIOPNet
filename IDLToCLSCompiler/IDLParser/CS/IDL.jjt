@@ -1,0 +1,1691 @@
+/* source file for javaCC jjTree for the CORBA IDL 2.3.1 language */
+
+
+options {
+  JAVA_UNICODE_ESCAPE=false;
+
+  STATIC=false; /* no static parser */
+  MULTI=true; /* different node types for every non-terminal, a node is generated for */
+  VISITOR=true; /* use the visitor pattern */
+  NODE_USES_PARSER=true; /* node will have access to the parser object, which can contain some global data */
+  NODE_PACKAGE="parser";
+}
+
+
+
+/* the parser class which will be generated */
+PARSER_BEGIN(IDLParser)
+
+namespace parser {
+
+using symboltable;
+using System.Collections;
+using System.Globalization;
+
+public class IDLParser {
+
+    /** the symbol table */
+    private SymbolTable m_symbolTable = new SymbolTable();
+    
+    public SymbolTable getSymbolTable() {
+        return m_symbolTable;
+    }
+
+    
+    // used for interface qualifier parsing: no modifier
+    private const int IS_DEFAULT_IF = 0;
+    // used for interface qualifier parsing: abstract modifier
+    private const int IS_ABSTRACT_IF = 1;
+    // used for interface qualifier parsing: local modifier
+    private const int IS_LOCAL_IF = 2;
+
+    // stores the last #pragma prefix value found
+    private String m_lastPrefix = "";
+
+    // stores reference to the module node inserted for a pragma prefix (if any)
+    private ASTmodule m_modForPrefix = null;
+    // stores reference to definition for the module node inserted for a pragma prefix (if any)
+    private ASTdefinition m_defForPrefix = null;
+
+
+    // from The Common Object Request Broker: Architecture and Specification, v2.3 (98-12-01.pdf)
+    //
+    // Table 3-5 The Formatting Characters
+    // Description       Abbreviation     ISO 646 Octal Value
+    // alert             BEL              007
+    // backspace         BS               010
+    // horizontal tab    HT               011
+    // newline           NL, LF           012
+    // vertical tab      VT               013
+    // form feed         FF               014
+    // carriage return   CR               015
+    //
+    // Table 3-9 Escape Sequences
+    // Description           Escape Sequence
+    // newline               \n
+    // horizontal tab        \t
+    // vertical tab          \v
+    // backspace             \b
+    // carriage return       \r
+    // form feed             \f
+    // alert                 \a
+    // backslash             \\
+    // question mark         \?
+    // single quote          \'
+    // double quote          \"
+    // octal number          \ooo
+    // hexadecimal number    \xhh
+    // unicode character     \\uhhhh                    - handled in ParseWideCharLiteral
+    //
+    private Char ParseCharLiteral(String charLiteral) {
+        if (!charLiteral.StartsWith("\\"))
+            return charLiteral[0];
+
+        if (charLiteral == "\\n")
+            return '\n';
+
+        if (charLiteral == "\\t")
+            return '\t';
+
+        if (charLiteral == "\\v")
+            return Convert.ToChar(11);                            // JavaCCCS doesn't know '\v' and '\xHH' notations
+
+        if (charLiteral == "\\b")
+            return '\b';
+
+        if (charLiteral == "\\r")
+            return '\r';
+
+        if (charLiteral == "\\f")
+            return '\f';
+
+        if (charLiteral == "\\a")
+            return Convert.ToChar(7);                            // JavaCCCS doesn't know '\v' and '\xHH' notations
+
+        if (charLiteral == "\\\\")
+            return '\\';
+
+        if (charLiteral == "\\?")
+            return '?';
+
+        if (charLiteral == "\\'")
+            return '\'';
+
+        if (charLiteral == "\\\"")
+            return '\"';
+
+        if (charLiteral.StartsWith("\\x") && (charLiteral.Length > 2 && charLiteral.Length < 5)) {
+            Int32 charValHex = Int32.Parse(charLiteral.Substring(2), NumberStyles.AllowHexSpecifier);
+            return Convert.ToChar(charValHex);            
+        }
+        
+        if (charLiteral.Equals("\\0"))                            // non-standard literal
+            return Convert.ToChar(0);
+        
+        if (charLiteral.Length > 1 && charLiteral.Length < 5) {
+            Int32 charValDec = Convert.ToInt32(charLiteral.Substring(1), 8);
+            return Convert.ToChar(charValDec);
+        }
+
+        throw new NotSupportedException("unsupported escape in character literal: " + charLiteral);
+    }
+
+    private Char ParseWideCharLiteral(String wideCharLiteral) {
+        if (!wideCharLiteral.StartsWith("\\u")) {
+            return ParseCharLiteral(wideCharLiteral);
+        } else {
+            Int32 charVal = Int32.Parse(wideCharLiteral.Substring(2), NumberStyles.AllowHexSpecifier);
+            return Convert.ToChar(charVal);
+        }
+    }
+
+
+}
+
+}
+
+PARSER_END(IDLParser)
+
+
+/*
+ * Tokens to ignore in the BNF follow.
+ */
+
+< DEFAULT, PRAGMA_DIRECTIVE> SKIP :
+{
+  < " " >
+| < "\t" >
+| < "\n" >
+| < "\r" >
+| "//" : IN_LINE_COMMENT
+| "/*" : IN_COMMENT
+| < "#" ([" ","\t"])* (["0"-"9"])+
+    (([" ","\t"])* "\"" (~["\""])+ "\""
+           ([" ","\t"])* (["0"-"9"])* ([" ","\t"])* (["0"-"9"])*)? "\n" >
+}
+
+<IN_LINE_COMMENT> SKIP:
+{
+   "\n" : DEFAULT
+}
+
+<IN_LINE_COMMENT> MORE:
+{
+  < ~[] >
+}
+
+<IN_COMMENT> SKIP:
+{
+   "*/" : DEFAULT
+}
+
+<IN_COMMENT> MORE:
+{
+  < ~[] >
+}
+
+String repIdVal() #void :
+{ Token repIdValToken; String result; }
+{
+  repIdValToken = <STRING> { 
+                               result = repIdValToken.image; 
+                               // remove "" around the literal
+                               return result.Substring(1, result.Length - 2);
+                           }
+|
+
+  repIdValToken = <REPIDVAL_STRING> { 
+                               result = repIdValToken.image; 
+                               // remove "" around the literal
+                               return result.Substring(1, result.Length - 2);
+                           }
+}
+
+
+/* handling of pragma id outside of a type definition */
+void pragmaID() #void :
+{ String ident = ""; String val = ""; }
+{
+    < PRAGMA > < PRAGMAID > ident = identifier() val = repIdVal()
+    {
+        Scope currentScope = m_symbolTable.getCurrentScope();
+        if (!m_lastPrefix.Equals("")) {
+            // prepend prefix
+            val = val.Insert(val.IndexOf(":") + 1, m_lastPrefix + "/");
+        }
+
+        currentScope.addPragmaID(ident, val); // add pragma ID
+    }
+
+}
+
+/* handling of pragma id inside a type definition */
+void pragmaIDInside() #void :
+{ String ident = ""; String val = ""; }
+{
+    < PRAGMA > < PRAGMAID > ident = identifier() val = repIdVal()
+    {
+        Scope currentScope = m_symbolTable.getCurrentScope();
+        
+        if (!m_lastPrefix.Equals("")) {
+            // prepend prefix
+            val = val.Insert(val.IndexOf(":") + 1, m_lastPrefix + "/");
+        }
+
+        currentScope.addPragmaID(ident, val); // add pragma ID
+    }
+
+}
+
+
+/* handling of pragma prefix */
+void pragmaPrefix() #void :
+{ String val = ""; }
+{
+    < PRAGMA > < PRAGMAPREFIX > val = string_literal() {
+        val = val.Trim();
+        if (m_lastPrefix.Equals(val)) { return; } // same pragma prefix, nothing to do
+
+        if ( (!(val.Equals(""))) && (m_symbolTable.getCurrentScope() != m_symbolTable.getTopScope())) {
+            throw new ParseException("invalid scope for using a #pragma prefix, only usable outside of module declarations");
+        }
+
+        if (m_symbolTable.isPragmaScopeOpen()) {
+            // close the scopes up to the pragma-scope (incl. pragma scope)
+            m_symbolTable.closePragmaScope();
+            // close module node for pragma
+            jjtree.closeNodeScope(m_modForPrefix, true);
+            jjtree.closeNodeScope(m_defForPrefix, true);
+            m_modForPrefix = null;
+            m_defForPrefix = null;
+            // open scopes for new pragma, if val != ""
+            m_symbolTable.openPragmaScope(val);
+        } else {
+            m_symbolTable.openPragmaScope(val);
+        }
+        // open a defintion and an included module node into the parse tree if val != "" --> insert a module opening for pragma prefix
+        if (!(val.Equals(""))) {
+            m_defForPrefix = new ASTdefinition(this, IDLParserTreeConstants.JJTDEFINITION);
+            jjtree.openNodeScope(m_defForPrefix);
+            m_modForPrefix = new ASTmodule(this, IDLParserTreeConstants.JJTMODULE);
+            jjtree.openNodeScope(m_modForPrefix);
+            m_modForPrefix.setIdent(val);
+        }
+        m_lastPrefix = val;
+    }
+}
+
+
+/* Production 1, chapter 3.4 in CORBA 2.3.1 spec, pragma prefix handling added here */
+
+ASTspecification specification() :
+{}
+{
+(    (      LOOKAHEAD(2)
+        definition() 
+    |
+         /* pragma prefix added here */
+        LOOKAHEAD(2)
+            pragmaPrefix()
+    )+ 
+
+  { 
+    if (m_modForPrefix != null) {
+        jjtree.closeNodeScope(m_modForPrefix, true); // close inserted module node scope for prefix, if one is open after parse completition
+        jjtree.closeNodeScope(m_defForPrefix, true); // close inserted definition node scope for prefix
+    }
+    return jjtThis; 
+  }
+) |
+/* added for accepting files with only ignored content */
+(
+    <EOF> { return jjtThis; }
+)  
+
+}
+
+/* Production 2, chapter 3.4 CORBA 2.3.1, added pragma id and prefix parsing, moved semicolon after value to production 14-17 */
+
+void definition() :
+{}
+{
+  type_dcl() ";"
+|
+  const_dcl() ";"
+|
+  except_dcl() ";"
+|
+  LOOKAHEAD(2)
+  interfacex() ";"
+|
+  module() ";"
+|
+  LOOKAHEAD(2)
+  value()
+|
+  /* pragma id added here */
+  pragmaID()
+}
+
+/* Production 3, chapter 3.4 in CORBA 2.3.1 spec */
+
+void module() :
+{ String ident = ""; }
+{
+  "module" ident = identifier() { m_symbolTable.openScope(ident, false); } "{" ( definition() )+ "}" 
+  { 
+    jjtThis.setIdent(ident);
+    // close scope for this module after parsing
+    m_symbolTable.closeScope();
+  
+  }
+}
+
+/* Production 4: chapter 3.4, CORBA 2.3.1. spec (renamed interface -> interfacex, because interface is a keyword in java) */
+
+void interfacex() :
+{}
+{
+  LOOKAHEAD(4)
+  interface_dcl()
+|
+  LOOKAHEAD(4)
+  forward_dcl()
+}
+
+/* Production 5: chapter 3.4, CORBA 2.3.1. spec */
+
+void interface_dcl() :
+{}
+{
+  interface_header() 
+  {
+    // add the interface symbol, after the header is completed
+    // get the header node
+    ASTinterface_header header = (ASTinterface_header) jjtree.peekNode();
+    Scope currentScope = m_symbolTable.getCurrentScope();
+    currentScope.addSymbol(header.getIdent());
+    Scope ifScope = m_symbolTable.openScope(header.getIdent(), true); // open a scope for type declaration inside the interface
+    IList inheritedScopes = header.getInheritedScopeNames(); // list of ASTscoped_name nodes
+    for (int i = 0; i <inheritedScopes.Count; i++) {
+        ASTscoped_name inheritedScope = (ASTscoped_name)inheritedScopes[i];
+        Scope inheritedResolved = 
+            m_symbolTable.ResolveScopedNameToScope((inheritedScope.hasFileScope() ? m_symbolTable.getTopScope() : currentScope),
+                                                   inheritedScope.getNameParts());
+        if (inheritedResolved != null) {
+            ifScope.AddInheritedScope(inheritedResolved);    
+        }
+    }    
+    
+  }
+  
+  "{" interface_body() "}"
+   {
+        m_symbolTable.closeScope(); // close the scope for type declarations inside the interface
+   }
+}
+
+/* Production 6: chapter 3.4, CORBA 2.3.1. spec; updated for local interfaces */
+
+void forward_dcl() :
+{ String ident = "";  
+  System.Int32 ifType = IS_DEFAULT_IF; }
+{
+  [ ifType = interface_qualifier() ] "interface" ident = identifier() 
+  { 
+    jjtThis.setIdent(ident); 
+    if (ifType == IS_ABSTRACT_IF) {
+       jjtThis.setAbstract();
+    }
+    if (ifType == IS_LOCAL_IF) {
+       jjtThis.setLocal();
+    }
+    Scope currentScope = m_symbolTable.getCurrentScope(); 
+    currentScope.addFwdDecl(ident);
+  }
+}
+
+/* Production 7: chapter 3.4, CORBA 2.3.1. spec; updated for local interfaces */
+
+void interface_header() :
+{ String ident = ""; 
+  System.Int32 ifType = IS_DEFAULT_IF; }
+{  
+  [ ifType = interface_qualifier() ] "interface" ident = identifier() [ interface_inheritance_spec() ] 
+  { 
+    jjtThis.setIdent(ident);
+    if (ifType == IS_ABSTRACT_IF) {
+       jjtThis.setAbstract();
+    }
+    if (ifType == IS_LOCAL_IF) {
+       jjtThis.setLocal();
+    }
+  }
+}
+
+
+/* interface qualifiers: local / abstract */
+
+System.Int32 interface_qualifier() # void :
+{ }
+{
+  ( 
+    "abstract" { return 1; } | 
+    "local"  { return 2; }
+  )
+}
+
+/* Production 8: chapter 3.4, CORBA 2.3.1 */
+
+void interface_body() :
+{}
+{
+  ( export() )*
+}
+
+/* Production 9: chater 3.4 CORBA 2.3.1, added pragma id inside */
+
+void export() :
+{}
+{
+  type_dcl() ";"
+|
+  const_dcl() ";"
+|
+  except_dcl() ";"
+|
+  attr_dcl() ";"
+|
+  op_dcl() ";"
+| 
+  pragmaIDInside()
+
+}
+
+/* Production 10: chapter 3.4 CORBA 2.3.1 */
+
+void interface_inheritance_spec() :
+{}
+{
+  ":" interface_name() ( "," interface_name() )*
+}
+
+
+/* Production 11: chapter 3.4, CORBA 2.3.1 */
+
+void interface_name() : 
+{}
+{ 
+    scoped_name()
+}
+
+/* Production 12: chapter 3.4, CORBA 2.3.1 */
+
+void scoped_name() :
+{ String part = "";
+  String fullScopedName = "";
+}
+{
+  (
+    [ "::" { fullScopedName = "::"; jjtThis.setHasFileScope(true); } ] part = identifier() {  fullScopedName += part; jjtThis.addNamePart(part); } ( "::" part = identifier() { fullScopedName += ("::" + part); jjtThis.addNamePart(part); } )*
+  ) { jjtThis.setScopedName(fullScopedName); }
+}
+
+
+
+/* Production 13: TBD: check if correct */
+
+void value() :
+{}
+{
+    LOOKAHEAD(4)
+    value_decl()
+|
+    LOOKAHEAD(4)
+    value_abs_decl()
+|
+    LOOKAHEAD(4)
+    value_box_decl()
+|
+    LOOKAHEAD(4)
+    value_forward_decl()
+}
+
+
+/* Production 14, chapter 3.4, CORBA 2.3.1 */
+
+void value_forward_decl() :
+{ String ident = "";
+  bool isAbstract = false;
+}
+{
+    ["abstract" { isAbstract = true; } ]  "valuetype" ident = identifier() ";"
+    { 
+      jjtThis.setIdent(ident);
+      jjtThis.setAbstract(isAbstract);
+      Scope currentScope = m_symbolTable.getCurrentScope();
+      currentScope.addFwdDecl(ident);
+    }
+}
+
+
+/* Production 15, chapter 3.4, CORBA 2.3.1 */
+
+void value_box_decl() :
+{ String ident = ""; }
+{
+    "valuetype" ident = identifier() type_spec() ";"
+    { 
+        jjtThis.setIdent(ident); 
+        // the symbol must not be added before the valuebox definition is completed, 3.8.2, CORBA 2.3.1 spec
+        Scope currentScope = m_symbolTable.getCurrentScope();
+        currentScope.addSymbol(ident);
+    }
+}
+
+/* Production 16, chapter 3.4, CORBA 2.3.1 */
+
+void value_abs_decl() :
+{ String ident = ""; }
+{
+    "abstract" "valuetype" ident = identifier() [ value_base_inheritance_spec() ] [ value_support_inheritance_spec() ] "{" 
+    { 
+    jjtThis.setIdent(ident); 
+        Scope currentScope = m_symbolTable.getCurrentScope();
+        currentScope.addSymbol(ident);
+        m_symbolTable.openScope(ident, true); // open a scope for type declaration inside this abstract value type
+    }
+        ( export() )* "}" ";"
+        {
+        m_symbolTable.closeScope();
+        }
+}
+
+/* Production 17, chapter 3.4, CORBA 2.3.1 */
+
+void value_decl() :
+{}
+{
+    value_header() 
+    {
+        // get the value header node
+        SimpleNodeWithIdent header = (SimpleNodeWithIdent) jjtree.peekNode();       
+        // add the symbol for this value type to the symbol table
+        Scope currentScope = m_symbolTable.getCurrentScope();
+            currentScope.addSymbol(header.getIdent());
+            m_symbolTable.openScope(header.getIdent(), true); // open a scope for type declaration inside this concrete value type
+    }
+    
+    "{" ( value_element() ) * "}" ";"
+        {
+        m_symbolTable.closeScope();
+        }
+}
+
+/* Production 18, chapter 3.4, CORBA 2.3.1 */
+
+void value_header() :
+{ String ident = "";
+  bool isCustom = false; }
+{
+    [ "custom" { isCustom = true; } ] "valuetype" ident = identifier() [ value_base_inheritance_spec() ] [ value_support_inheritance_spec() ] { jjtThis.setIdent(ident); jjtThis.setCustom(isCustom); }
+}
+
+/* Production 19, chapter 3.4, CORBA 2.3.1, separated into two productions */
+
+void value_base_inheritance_spec() :
+{}
+{
+    ":" [ "truncatable" ] value_name() ( "," value_name() )*
+}
+
+void value_support_inheritance_spec() :
+{}
+{
+    "supports" interface_name() ( "," interface_name() )*
+}
+
+/* Production 20, chapter 3.4, CORBA 2.3.1 */
+
+void value_name() :
+{}
+{
+    scoped_name()
+}
+
+/* Production 21, chapter 3.4, CORBA 2.3.1 */
+
+void value_element() :
+{}
+{
+    export() 
+|
+    state_member()
+|
+    init_decl() 
+}
+
+/* Production 22, chapter 3.4, CORBA 2.3.1 */
+
+void state_member() :
+{}
+{
+    ( "public" { jjtThis.setIsPrivate(false); } | "private" { jjtThis.setIsPrivate(true); } ) type_spec() declarators() ";"
+}
+
+/* Production 23, chapter 3.4, CORBA 2.3.1 */
+
+void init_decl() :
+{ String ident = ""; }
+{
+    "factory" ident = identifier() "(" [ init_param_delcs() ] ")" [ raises_expr() ] ";" { jjtThis.setIdent(ident); }
+}
+
+/* Production 24, chapter 3.4, CORBA 2.3.1 */
+
+void init_param_delcs() :
+{}
+{
+    init_param_decl() ( "," init_param_decl() )* 
+}
+
+/* Production 25, chapter 3.4, CORBA 2.3.1 */
+
+void init_param_decl() :
+{}
+{
+    init_param_attribute() param_type_spec() simple_declarator()
+}
+
+/* Production 26, chapter 3.4, CORBA 2.3.1 */
+
+void init_param_attribute() :
+{}
+{
+    "in"
+}
+
+/* Production 27 chapter 3.4, corba 2.3.1 */
+
+void const_dcl() :
+{ String ident = ""; }
+{
+  "const" const_type() ( 
+                           ident = identifier() | 
+                           ( "NaN" { ident = "NotANumber"; } ) 
+  ) "=" const_exp() { 
+    jjtThis.setIdent(ident);
+    Scope currentScope = m_symbolTable.getCurrentScope();
+    currentScope.addSymbolValue(ident);
+ }
+}
+
+/* Production 28 chapter 3.4, corba 2.3.1 */
+
+void const_type() :
+{}
+{
+  LOOKAHEAD(2)
+  integer_type()
+|
+  char_type()
+|
+  wide_char_type()
+|
+  boolean_type()
+|
+  floating_pt_type()
+|
+  string_type()
+|
+  wide_string_type()
+|
+  fixed_pt_const_type() 
+|
+  scoped_name()
+|
+  octet_type()
+}
+
+/* Production 29 chapter 3.4, corba 2.3.1 */
+
+void const_exp() :
+{}
+{
+  or_expr()
+}
+
+/* Production 30 chapter 3.4 corba 2.3.1 (resolved left side recursion here) */
+
+void or_expr() :
+{}
+{
+  xor_expr() ( "|" xor_expr() )*
+}
+
+/* Production 31 chapter 3.4 corba 2.3.1 (reformulated without recursion) */
+
+void xor_expr() :
+{}
+{
+  and_expr() ( "^" and_expr() )*
+}
+
+/* Production 32 chapter 3.4 corba 2.3.1 (reformulated without recursion) */
+
+void and_expr() :
+{}
+{
+  shift_expr() ( "&" shift_expr() )*
+}
+
+/* Production 33 */
+
+void shift_expr() :
+{}
+{
+  add_expr() ( ( ">>" { jjtThis.AppendShiftOperation(ShiftOps.Right); }
+               | "<<" { jjtThis.AppendShiftOperation(ShiftOps.Left); }
+             ) add_expr() )*
+}
+
+/* Production 34 */
+
+void add_expr() :
+{}
+{
+  mult_expr() ( ( "+" { jjtThis.AppendAddOperation(AddOps.Plus); }
+                | "-" { jjtThis.AppendAddOperation(AddOps.Minus); }
+              ) mult_expr() )*
+}
+
+/* Production 35 */
+
+void mult_expr() :
+{}
+{
+  unary_expr() ( ( "*" { jjtThis.AppendMultOperation(MultOps.Mult); }
+                 | "/" { jjtThis.AppendMultOperation(MultOps.Div); }
+                 | "%" { jjtThis.AppendMultOperation(MultOps.Mod); }
+               ) unary_expr() )*
+}
+
+/* Production 36 */
+
+void unary_expr() :
+{ UnaryOps unary_op = UnaryOps.UnaryNone; }
+{
+  [ unary_op = unary_operator() ] primary_expr() { jjtThis.SetUnaryOperation(unary_op); }
+}
+
+/* Production 37 chapter 3.4 corba 2.3.1 */
+UnaryOps unary_operator() #void :
+{}
+{
+  "-" { return UnaryOps.UnaryMinus; }
+|
+  "+" { return UnaryOps.UnaryPlus; }
+|
+  "~" { return UnaryOps.UnaryNegate; }
+}
+
+/* Production 38 chapter 3.4 corba 2.3.1 */
+
+void primary_expr() :
+{}
+{
+  scoped_name()
+|
+  literal()
+|
+  "(" const_exp() ")"
+}
+
+/* Production 39 chapter 3.4 corba 2.3.1 */
+
+void literal() :
+{ Object litVal; }
+{
+(
+  LOOKAHEAD(2)
+  litVal = integer_literal() { jjtThis.setLitVal(new IntegerLiteral((Decimal)litVal)); }
+|
+  litVal = string_literal() { jjtThis.setLitVal(new StringLiteral((String)litVal, false)); }
+|
+  LOOKAHEAD(2)
+  litVal = wide_string_literal() { jjtThis.setLitVal(new StringLiteral((String)litVal, true)); }
+|
+  litVal = character_literal() { jjtThis.setLitVal(new CharLiteral((Char)litVal, false)); }
+|
+  LOOKAHEAD(2)
+  litVal = wide_character_literal() { jjtThis.setLitVal(new CharLiteral((Char)litVal, true)); }
+|
+  LOOKAHEAD(2)
+  litVal = fixed_pt_literal() { throw new NotSupportedException("fixed point literal not yet supported"); }
+|
+  LOOKAHEAD(2)
+  litVal = floating_pt_literal() { jjtThis.setLitVal(new FloatLiteral((Double)litVal)); }
+|  
+  litVal = boolean_literal() { jjtThis.setLitVal(new BooleanLiteral((Boolean)litVal)); }
+) 
+}
+
+/* Production 40, chapter 3.4 corba 2.3.1 */
+
+System.Boolean boolean_literal() #void :
+{}
+{
+  "TRUE" { return true; }
+|
+  "FALSE" { return false; }
+}
+
+/* Production 41, chapter 3.4, corba 2.3.1 */
+
+void positive_int_const() :
+{}
+{
+  const_exp()
+}
+
+/* Production 42: chapter 3.4 corba 2.3.1 */
+
+void type_dcl() :
+{}
+{
+  "typedef" type_declarator()
+|
+  struct_type()
+|
+  union_type()
+|
+  enum_type()
+|
+  "native" simple_declarator()
+}
+
+/* Production 43, chapter 3.4, corba 2.3.1 */
+
+void type_declarator() :
+{ }
+{
+  type_spec() declarators() { 
+        Node declaratorNodes = jjtThis.jjtGetChild(1);  
+            Scope currentScope = m_symbolTable.getCurrentScope();
+        for (int i = 0; i < declaratorNodes.jjtGetNumChildren(); i++) {
+            ASTdeclarator decl = (ASTdeclarator) declaratorNodes.jjtGetChild(i);
+            if (decl.jjtGetChild(0) is ASTsimple_declarator) {
+                String ident = ((SimpleNodeWithIdent) decl.jjtGetChild(0)).getIdent();
+                currentScope.addTypeDef(ident);
+            } else if (decl.jjtGetChild(0) is ASTcomplex_declarator) {
+                /* complex_declarator contains an array_declarator */                
+                String ident = ((SimpleNodeWithIdent) decl.jjtGetChild(0).jjtGetChild(0)).getIdent();
+                currentScope.addTypeDef(ident);
+            }
+        }
+  }
+}
+
+/* Production 44, chapter 3.4, corba 2.3.1 */
+
+void type_spec() :
+{}
+{
+  simple_type_spec()
+|
+  constr_type_spec()
+}
+
+/* Production 45, chapter 3.4, corba 2.3.1 */
+
+void simple_type_spec() :
+{}
+{
+  base_type_spec()
+|
+  template_type_spec()
+|
+  scoped_name()
+}
+
+/* Production 46: chapter 3.4 corba 2.3.1 */
+
+void base_type_spec() :
+{}
+{
+  LOOKAHEAD(2)
+  floating_pt_type()
+|
+  integer_type()
+|
+  char_type()
+|
+  wide_char_type()
+|  
+  boolean_type()
+|
+  octet_type()
+|
+  any_type()
+|
+  object_type()
+|
+  value_base_type()
+}
+
+/* Production 47: chapter 3.4 corba 2.3.1 */
+
+void template_type_spec() :
+{}
+{
+  sequence_type()
+|
+  string_type()
+|
+  wide_string_type()
+|
+  fixed_pt_type()
+}
+
+/* Production 48, chapter 3.4, corba 2.3.1 */
+
+void constr_type_spec() :
+{}
+{
+  struct_type()
+|
+  union_type()
+|
+  enum_type()
+}
+
+/* Production 49, chapter 3.4, corba 2.3.1 */
+
+void declarators() :
+{}
+{
+  declarator() ( "," declarator() )*
+}
+
+/* Production 50, chapter 3.4, corba 2.3.1 */
+
+void declarator() :
+{}
+{
+  LOOKAHEAD(2)
+  complex_declarator()
+|
+  simple_declarator()
+}
+
+/* Production 51, chapter 3.4, corba 2.3.1 */
+
+void simple_declarator() :
+{ String ident = ""; }
+{
+  ident = identifier() { jjtThis.setIdent(ident); }
+}
+
+/* Production 52, chapter 3.4, corba 2.3.1 */
+
+void complex_declarator() :
+{}
+{
+  array_declarator()
+}
+
+/* Production 53, changed to the style used for int_types */
+
+void floating_pt_type() :
+{}
+{
+  floating_pt_type_longdouble()
+|  
+  floating_pt_type_float()
+|
+  floating_pt_type_double()
+  
+}
+
+/* Production 53 a */
+void floating_pt_type_float() :
+{}
+{
+  "float"
+}
+/* Production 53 b */
+void floating_pt_type_double() :
+{}
+{
+  "double"
+}
+/* Production 53 c */
+void floating_pt_type_longdouble() :
+{}
+{
+  "long" "double"
+}
+
+/* Production 54, chapter 3.4, corba 2.3.1 */
+
+void integer_type() :
+{}
+{
+  signed_int()
+|
+  unsigned_int()
+}
+
+/* Production 55, chapter 3.4, corba 2.3.1 */
+
+void signed_int() :
+{}
+{
+  LOOKAHEAD(3)
+  signed_longlong_int()
+|
+  LOOKAHEAD(3)
+  signed_long_int()
+|
+  signed_short_int()
+  
+}
+
+
+/* Production 56, chapter 3.4, corba 2.3.1 */
+
+void signed_short_int() :
+{}
+{
+  "short"
+}
+
+/* Production 57, chapter 3.4, corba 2.3.1 */
+
+void signed_long_int() :
+{}
+{
+  "long"
+}
+
+/* Production 58, chapter 3.4, corba 2.3.1 */
+
+void signed_longlong_int() :
+{}
+{
+  "long" "long"
+}
+
+
+
+/* Production 59, chapter 3.4 corba 2.3.1 */
+
+void unsigned_int() :
+{}
+{
+  LOOKAHEAD(3)
+  unsigned_longlong_int()
+|
+  LOOKAHEAD(3)
+  unsigned_long_int()
+|
+  unsigned_short_int()
+}
+
+
+/* Production 60, chapter 3.4, corba 2.3.1 */
+
+void unsigned_short_int() :
+{}
+{
+  "unsigned" "short"
+}
+
+
+/* Production 61, chapter 3.4, corba 2.3.1 */
+
+void unsigned_long_int() :
+{}
+{
+  "unsigned" "long"
+}
+
+/* Production 62, chapter 3.4, corba 2.3.1 */
+
+void unsigned_longlong_int() :
+{}
+{
+  "unsigned" "long" "long"
+}
+
+/* Production 63, chapter 3.4, corba 2.3.1 */
+
+void char_type() :
+{}
+{
+  "char"
+}
+
+/* Production 64, chapter 3.4, corba 2.3.1 */
+
+void wide_char_type() :
+{}
+{
+  "wchar"
+}
+
+
+/* Production 65, chapter 3.4, corba 2.3.1  */
+
+void boolean_type() :
+{}
+{
+  "boolean"
+}
+
+/* Production 66, chapter 3.4, corba 2.3.1 */
+
+void octet_type() :
+{}
+{
+  "octet"
+}
+
+/* Production 67, chapter 3.4, corba 2.3.1 */
+
+void any_type() :
+{}
+{
+  "any"
+}
+
+/* Production 68, chapter 3.4, corba 2.3.1 */
+
+void object_type() :
+{}
+{
+  "Object"
+}
+
+/* Production 69, chapter 3.4, corba 2.3.1 */
+
+void struct_type() :
+{ String ident = ""; }
+{
+  "struct" ident = identifier() {
+    // recursive definition using a sequence is permitted --> publish symbol already here
+    Scope currentScope = m_symbolTable.getCurrentScope();
+    currentScope.addSymbol(ident);      
+    jjtThis.setIdent(ident); 
+    m_symbolTable.openScope(ident, true); // open a scope for type declaration inside the struct
+  }
+  "{" member_list() "}" { 
+    m_symbolTable.closeScope();
+   }
+}
+
+/* Production 70, chapter 3.4, corba 2.3.1 */
+
+void member_list() :
+{}
+{
+  ( member() )+
+}
+
+/* Production 71, chapter 3.4, corba 2.3.1 */
+
+void member() :
+{}
+{
+  type_spec() declarators() ";"
+}
+
+/* Production 72, chapter 3.4, corba 2.3.1 */
+
+void union_type() :
+{ String ident = ""; }
+{
+  "union" ident = identifier() {
+    // recursive definition using a sequence is permitted --> publish symbol already here
+    Scope currentScope = m_symbolTable.getCurrentScope();
+    currentScope.addSymbol(ident);      
+    jjtThis.setIdent(ident); 
+  } "switch" "(" 
+  {
+     m_symbolTable.openScope(ident, true); // open a scope for type declaration inside the union
+  }
+  switch_type_spec() ")" "{" switch_body() "}" 
+  { 
+     m_symbolTable.closeScope();
+  }
+}
+
+/* Production 73, chapter 3.4, corba 2.3.1 */
+
+void switch_type_spec() :
+{}
+{
+  integer_type()
+|
+  char_type()
+|
+  boolean_type()
+|
+  enum_type()
+|
+  scoped_name()
+}
+
+/* Production 74, chapter 3.4, corba 2.3.1 */
+
+void switch_body() :
+{}
+{
+  ( casex() )+
+}
+
+/* Production 75, chapter 3.4, corba 2.3.1 (renamed case -> casex, because case is a keyword in java) */
+
+void casex() :
+{}
+{
+  ( case_label() )+ element_spec() ";"
+}
+
+/* Production 76, chapter 3.4, corba 2.3.1 */
+
+void case_label() :
+{ }
+{
+  "case" const_exp() ":"
+|
+  "default" ":" {  jjtThis.setDefault(); }
+}
+
+/* Production 77, chapter 3.4, corba 2.3.1 */
+
+void element_spec() :
+{}
+{
+  type_spec() declarator()
+}
+
+/* Production 78, chapter 3.4, corba 2.3.1 */
+
+void enum_type() :
+{ String ident = ""; }
+{
+  "enum" ident = identifier() "{" enumerator() ( "," enumerator() )* "}" 
+  { 
+    jjtThis.setIdent(ident); 
+    Scope currentScope = m_symbolTable.getCurrentScope();
+    currentScope.addSymbol(ident);
+  }
+}
+
+/* Production 79, chapter 3.4, corba 2.3.1 */
+
+void enumerator() :
+{ String ident = ""; }
+{
+  ident = identifier() { 
+      jjtThis.setIdent(ident); 
+      Scope currentScope = m_symbolTable.getCurrentScope();
+      currentScope.addSymbolValue(ident);
+  }
+}
+
+/* Production 80, chapter 3.4, corba 2.3.1 */
+
+void sequence_type() :
+{}
+{
+  "sequence" "<" simple_type_spec() [ "," positive_int_const() ] ">"
+}
+
+/* Production 81, chapter 3.4, corba 2.3.1 */
+
+void string_type() :
+{}
+{
+  "string" [ "<" positive_int_const() ">" ]
+}
+
+/* Production 82, chapter 3.4, corba 2.3.1 */
+
+void wide_string_type() :
+{}
+{
+  "wstring" [ "<" positive_int_const() ">" ]
+}
+
+/* Production 83, chapter 3.4, corba 2.3.1 */
+
+void array_declarator() :
+{ String ident = ""; }
+{
+  ident = identifier() ( fixed_array_size() )+ { jjtThis.setIdent(ident); }
+}
+
+/* Production 84, chapter 3.4, corba 2.3.1*/
+
+void fixed_array_size() :
+{}
+{
+  "[" positive_int_const() "]"
+}
+
+/* Production 85, chapter 3.4, corba 2.3.1 */
+
+void attr_dcl() :
+{ bool isReadOnly = false; }
+{
+  [ "readonly" { isReadOnly = true; } ] "attribute" param_type_spec() simple_declarator() ( "," simple_declarator() )*
+  { jjtThis.setReadOnly(isReadOnly); }
+}
+
+/* Production 86, chapter 3.4, corba 2.3.1 */
+
+void except_dcl() :
+{ String ident = ""; }
+{
+  "exception" ident = identifier() {
+    Scope currentScope = m_symbolTable.getCurrentScope();
+    currentScope.addSymbol(ident);
+    jjtThis.setIdent(ident); 
+    m_symbolTable.openScope(ident, true); // open a scope for type declaration inside the exception
+  }
+  "{" ( member() )* "}" 
+   { 
+    m_symbolTable.closeScope();
+   }
+}
+
+/* Production 87, chapter 3.4, corba 2.3.1 */
+
+void op_dcl() :
+{ String ident = "";
+  int opAttr = ASTop_dcl.OP_Attr_NONE;
+}
+{
+  [ opAttr = op_attribute() ] op_type_spec() ident = identifier() parameter_dcls() [ raises_expr() ] [ context_expr() ]
+  { jjtThis.setIdent(ident); /* set the identifier for this node */ 
+    jjtThis.setOpAttr(opAttr);
+  }
+}
+
+/* Production 88, chapter 3.4, corba 2.3.1 */
+
+int op_attribute() #void :
+{}
+{
+  "oneway" { return ASTop_dcl.OP_Attr_ONEWAY; }
+}
+
+/* Production 89, chapter 3.4, corba 2.3.1 */
+
+void op_type_spec() :
+{}
+{
+  param_type_spec()
+|
+  "void"
+}
+
+/* Production 90, chapter 3.4, corba 2.3.1 */
+
+void parameter_dcls() :
+{}
+{
+  "(" [ param_dcl() ( "," param_dcl() )* ] ")"
+}
+
+/* Production 91, chapter 3.4, corba 2.3.1 */
+
+void param_dcl() :
+{}
+{
+  param_attribute() param_type_spec() simple_declarator()
+}
+
+/* Production 92, chapter 3.4, corba 2.3.1 */
+
+void param_attribute() :
+{}
+{
+  "in" { jjtThis.setParamDir(ASTparam_attribute.ParamDir_IN); }
+|
+  "out" { jjtThis.setParamDir(ASTparam_attribute.ParamDir_OUT); }
+|
+  "inout" { jjtThis.setParamDir(ASTparam_attribute.ParamDir_INOUT); }
+}
+
+/* Production 93, chapter 3.4, corba 2.3.1 */
+
+void raises_expr() :
+{}
+{
+  "raises" "(" scoped_name() ( "," scoped_name() )* ")"
+}
+
+/* Production 94, chapter 3.4, corba 2.3.1 */
+
+void context_expr() :
+{ String contElem = ""; }
+{
+  "context" "(" contElem = string_literal() { jjtThis.AddContextElement(contElem); } 
+  ( "," contElem = string_literal() { jjtThis.AddContextElement(contElem); } )* ")"
+}
+
+/* Production 95, chapter 3.4, corba 2.3.1 */
+
+void param_type_spec() :
+{}
+{
+  base_type_spec()
+|
+  string_type()
+|
+  wide_string_type()
+|
+  scoped_name()
+}
+
+/* Production 96, chapter 3.4, corba 2.3.1 */
+
+void fixed_pt_type() :
+{ }
+{
+    "fixed" "<" positive_int_const() "," positive_int_const() ">"
+}
+
+/* Production 97, chapter 3.4, corba 2.3.1 */
+
+void fixed_pt_const_type() :
+{}
+{
+    "fixed"
+}
+
+/* Production 98, chapter 3.4, corba 2.3.1 */
+
+void value_base_type() :
+{}
+{
+    "ValueBase"
+}
+
+
+
+/* Definitions of complex regular expressions follow */
+
+String identifier() #void :
+{ Token idToken; }
+{
+  idToken = <ID> { return idToken.image; }
+}
+
+System.Decimal integer_literal() #void :
+{ Token intToken; }
+{
+(     intToken = <OCTALINT> { 
+                                String octVal = intToken.image;
+                                // remove leading 0
+                                octVal = octVal.Substring(1);
+                                // check for l, L, u, U at the end
+                                if (octVal.EndsWith("l") || octVal.EndsWith("L") || octVal.EndsWith("u") || octVal.EndsWith("U")) {
+                                    octVal = octVal.Substring(0, octVal.Length-1); // remove u, U, L, l
+                                }
+                                return StringToIntConverter.Parse(octVal, 8);
+                            }
+|
+      intToken = <DECIMALINT> { 
+                                String val = intToken.image;
+                                // check for l, L, u, U at the end
+                                if (val.EndsWith("l") || val.EndsWith("L") || val.EndsWith("u") || val.EndsWith("U")) {
+                                    val = val.Substring(0, val.Length-1); // remove u, U, L, l
+                                }
+                                return StringToIntConverter.Parse(val, 10);
+                              }
+|
+      intToken = <HEXADECIMALINT> { 
+                                String hexVal = intToken.image;
+                                // has leading leading 0x, remove it
+                                hexVal = hexVal.Substring(2);
+                                // check for l, L, u, U at the end
+                                if (hexVal.EndsWith("l") || hexVal.EndsWith("L") || hexVal.EndsWith("u") || hexVal.EndsWith("U")) {
+                                    hexVal = hexVal.Substring(0, hexVal.Length-1); // remove u, U, L, l
+                                }
+                                return StringToIntConverter.Parse(hexVal, 16);
+                              }  
+)  
+}
+
+String string_literal() #void :
+{ Token stringToken; }
+{
+  stringToken = <STRING> { 
+                                    String result = stringToken.image; 
+                                    // remove "" around the literal
+                                    return result.Substring(1, result.Length - 2);
+                         }
+}
+
+String wide_string_literal() #void :
+{ Token stringToken; }
+{
+   stringToken = <WIDESTRING> { 
+                                    String result = stringToken.image; 
+                                    // remove L prefix and remove "" around the literal
+                                    return result.Substring(2, result.Length - 3);
+                              }
+}
+
+char character_literal() #void :
+{ Token charToken; }
+{
+  charToken = <CHARACTER> { 
+          // char is enclosed by ''
+          return ParseCharLiteral(charToken.image.Substring(1, charToken.image.Length - 2));
+  }
+                                
+}
+
+char wide_character_literal() #void :
+{ Token charToken; }
+{
+  charToken = <WIDECHARACTER> {
+          // wide char is prepended by a L and enclosed by ''
+          return ParseWideCharLiteral(charToken.image.Substring(2, charToken.image.Length - 3));
+  }
+}
+
+System.Double floating_pt_literal() #void :
+{ Token floatLiteral = null; }
+{
+(
+ ( 
+  (
+         floatLiteral = <FLOATONE> 
+     |
+         floatLiteral = <FLOATTWO>
+  ) { 
+      String floatVal = floatLiteral.image;
+      if (floatVal.EndsWith("f") || floatVal.EndsWith("F") || floatVal.EndsWith("l") || floatVal.EndsWith("L")) {
+        floatVal = floatVal.Substring(0, floatVal.Length - 1);
+      }
+      return Double.Parse(floatVal, System.Globalization.CultureInfo.InvariantCulture);
+    }
+ )
+|
+         "NaN" 
+{    
+    return Double.NaN;    
+}
+|
+         "Infinity"
+{
+    return Double.PositiveInfinity;
+}
+)
+
+}
+
+System.Decimal fixed_pt_literal() #void :
+{ Token fixedLiteral; }
+{
+    fixedLiteral = <FIXED>
+{
+    String fixedVal = fixedLiteral.image;
+    if (fixedVal.EndsWith("d") || fixedVal.EndsWith("D")) {
+        fixedVal = fixedVal.Substring(0, fixedVal.Length - 1);
+    }
+    return Decimal.Parse(fixedVal, System.Globalization.CultureInfo.InvariantCulture);
+}
+
+}
+
+TOKEN : {
+  < PRAGMA : "#pragma" > : PRAGMA_DIRECTIVE
+}
+
+<PRAGMA_DIRECTIVE> TOKEN : {
+  <  PRAGMAID : "ID" > : DEFAULT |
+  <  PRAGMAPREFIX : "prefix" > : DEFAULT
+}
+
+TOKEN :
+{
+  <  ID : ["a"-"z","A"-"Z", "_", "ß", "ÿ"] (["a"-"z","A"-"Z","0"-"9","_", "ß", "ÿ"])* >
+| <  OCTALINT : "0" (["0"-"7"])+ (["u","U","l","L"])? >
+| <  DECIMALINT : "0" | ( ["1"-"9"] (["0"-"9"])* (["u","U","l","L"])? ) >
+| <  HEXADECIMALINT : ("0x"|"0X") (["0"-"9","a"-"f","A"-"F"])+ (["u","U","l","L"])? >
+| <  FLOATONE : ((["0"-"9"])+ "." (["0"-"9"])* | (["0"-"9"])* "." (["0"-"9"])+)
+   (["e","E"] (["-","+"])? (["0"-"9"])+)? (["f","F","l","L"])? >
+| <  FLOATTWO : (["0"-"9"])+ ["e","E"] (["-","+"])?
+   (["0"-"9"])+ (["f","F","l","L"])? >
+| <  CHARACTER : "'"
+   (   (~["'","\\","\n","\r"])
+   | ("\\" (
+             ["n","t","v","b","r","f","a","\\","?","'","\""]
+            |
+             (["0"-"7"])+
+            |
+             "x" (["0"-"9","a"-"f","A"-"F"])+
+           )
+     )
+   )
+   "'" >
+| <  WIDECHARACTER : "L" "'"
+   (   (~["'","\\","\n","\r"])
+   | ("\\" (
+             ["n","t","v","b","r","f","a","\\","?","'","\""]
+            |
+             (["0"-"7"])+
+            |
+             "x" (["0"-"9","a"-"f","A"-"F"])+
+            | 
+             "u" (["0"-"9","a"-"f","A"-"F"])+ 
+           )
+     )
+   )
+   "'" >
+| <  STRING : "\""
+   ( ( ~["\"","\\","\n","\r"])
+   | ("\\" (
+             ["n","t","v","b","r","f","a","\\","?","'","\""]
+            |
+             (["0"-"7"])+
+            |
+             "x" (["0"-"9","a"-"f","A"-"F"])+
+           )
+     )
+   )*
+   "\"" >
+| <  WIDESTRING : "L" "\""
+   ( ( ~["\"","\\","\n","\r"])
+   | ("\\" (
+             ["n","t","v","b","r","f","a","\\","?","'","\""]
+            |
+             "0" (["0"-"7"])*
+            |
+             "x" (["0"-"9","a"-"f","A"-"F"])+
+            |
+             // unicode
+             "u" (["0"-"9","a"-"f","A"-"F"])+
+           )
+     )
+   )*
+   "\"" >
+| <  REPIDVAL_STRING : "\""
+   // a rep-id string allows the use \ as normal character, e.g. \U0024
+   // REPIDVAL_STRING is a superset of STRING; 
+   // because REPIDVAL_STRING is defined after STRING in grammer file, normally STRING is matched; REPIDVAL_STRING is only matched, if not in STRING subset
+   ( ( ~["\"","\n","\r"])
+   )*
+   "\"" >
+|
+  <  FIXED : ( (["0"-"9"])+ "." (["0"-"9"])* | (["0"-"9"])* "." (["0"-"9"])+ | (["0"-"9"])+ )
+               (["d","D"]) >
+
+}

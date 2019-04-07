@@ -1,0 +1,92 @@
+/* TestService.java
+ *
+ * Project: IIOP.NET
+ * IntegrationTests
+ *
+ * WHEN      RESPONSIBLE
+ * 17.08.03  Dominic Ullmann (DUL), dominic.ullmann -at- elca.ch
+ *
+ * Copyright 2003 ELCA Informatique SA
+ * Av. de la Harpe 22-24, 1000 Lausanne 13, Switzerland
+ * www.elca.ch
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+package Ch.Elca.Iiop.IntegrationTests.MappingPlugin;
+
+import java.rmi.RemoteException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Date;
+    
+
+public interface TestService extends java.rmi.Remote {
+
+    public ArrayList createShortList(short val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createIntList(int val, int nrOfElems) throws RemoteException;
+    
+    public ArrayList createLongList(long val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createByteList(byte val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createCharList(char val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createBooleanList(boolean val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createFloatList(float val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createDoubleList(double val, int nrOfElems) throws RemoteException;
+
+    public ArrayList createValTypeList(String msg, int nrOfElems) throws RemoteException;
+
+    public ArrayList createByRefTypeList(int nrOfElems) throws RemoteException;
+
+    public ArrayList echoList(ArrayList arg) throws RemoteException;
+
+
+    public HashMap createHashMapWithShortVals(short val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithIntVals(int val, int nrOfElems) throws RemoteException;
+    
+    public HashMap createHashMapWithLongVals(long val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithByteVals(byte val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithCharVals(char val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithBooleanVals(boolean val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithFloatVals(float val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithDoubleVals(double val, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithValTypeVals(String msg, int nrOfElems) throws RemoteException;
+
+    public HashMap createHashMapWithByRefVals(int nrOfElems) throws RemoteException;
+
+    public HashMap echoHashMap(HashMap arg) throws RemoteException;
+    
+    
+    
+    public Date echoDate(Date arg) throws RemoteException;
+
+    public Date receiveCurrentDate() throws RemoteException;
+
+    public CustomMappedSerializable echoCustomMappedSer(CustomMappedSerializable arg) throws RemoteException;
+
+
+}

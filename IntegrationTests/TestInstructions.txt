@@ -1,0 +1,24 @@
+The integration tests test the functionality of IIOP.NET.
+
+Running these tests requires NUnit V2. Before building the tests, you need to 
+set the environment variable NUNITV2_HOME to the home directory of NUNIT V2.
+If the path contains spaces, you must use quotation marks around the path.
+
+Building the tests:
+- call nmake in this directory.
+
+Running the tests:
+- check the instructions in the test-directories.
+
+Known Problems
+--------------
+
+1. Using .NET Framework 1.1
+
+When using the .NET Framework 1.1, you must configure NUnit 2.0 to use the 
+same Framework version. To do so, add the line
+  <startup> 
+    <supportedRuntime version="v1.1.4322" /> 
+  </startup> 
+in the files %NUNTIV2_HOME%/bin/nunit-gui.exe.config and 
+%NUNTIV2_HOME%/bin/nunit-console.exe.config

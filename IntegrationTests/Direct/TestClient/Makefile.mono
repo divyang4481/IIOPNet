@@ -1,0 +1,31 @@
+include ../../../MakeVars.mono
+NUNIT=${NUNITV2_HOME}/$(NUNIT_BIN_SUBDIR)nunit.framework.dll
+IIOPCHANNEL = ../../../IIOPChannel/bin/IIOPChannel.dll
+TestService = ../TestServer/bin/TestServiceCommon.dll
+TestUnion = ../TestServer/bin/TestUnion.dll
+bin = bin/
+
+build: $(bin)ClientTest.dll
+
+$(bin)TestUnion.dll : $(TestUnion)
+	cp -f $(TestUnion) $(bin)
+	
+
+$(bin)IIOPChannel.dll: $(IIOPCHANNEL)
+	[ -d $(bin) ] || mkdir $(bin)
+	cp $(IIOPCHANNEL) $(bin)
+
+$(bin)TestServiceCommon.dll: $(TestService)
+	[ -d $(bin) ] || mkdir $(bin)
+	cp $(TestService) $(bin)TestServiceCommon.dll
+
+$(bin)ClientTest.dll: $(bin)IIOPChannel.dll $(bin)TestUnion.dll $(bin)TestServiceCommon.dll *.cs
+	$(CSC) $(CSFLAGS) /t:library /r:$(NUNIT) /r:$(bin)TestUnion.dll /r:$(bin)TestServiceCommon.dll /r:$(bin)IIOPChannel.dll /out:$(bin)/ClientTest.dll TestClient.cs
+	cp $(NUNIT) $(bin)
+
+start-client:
+	@echo "Direct IntegrationTest"
+	mono ${NUNITV2_HOME}/$(NUNIT_BIN_SUBDIR)nunit-console.exe bin/ClientTest.dll
+
+clean:
+	rm -rf bin

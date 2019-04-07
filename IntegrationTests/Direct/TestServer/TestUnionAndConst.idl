@@ -1,0 +1,181 @@
+module Ch {
+module Elca {
+module Iiop {
+module IntegrationTests {
+
+
+    enum TestEnumForU {
+        A, B, C
+    };
+
+
+    union TestUnion switch(long) {
+        case 0: short val0;
+        case 1:
+        case 2: long val1;
+        default: boolean val2;
+    };
+
+    union TestUnionULong switch(unsigned long) {
+        case 0: short val0;
+        case 0x80000000: long val1;
+        default: boolean val2;
+    };
+
+
+    union TestUnionE switch(TestEnumForU) {
+        case A: short valE0;
+        case B: 
+        case C: TestEnumForU valE1;
+    };
+
+    
+    // testing different constants and Constant-expressions
+    const long MyConstant = 11;
+
+    const char NonEscapeCharConst = 'a';
+    const wchar UnicodeEscapeCharConst1 = L'\u62';
+    const wchar UnicodeEscapeCharConst2 = L'\uFFFF';
+    const char HexEscapeCharConst = '\0x62';
+    const char DecEscapeCharConst1 = '\97';
+    const char DecEscapeCharConst2 = '\0';
+    
+
+    // IDLToCLSCompiler regression test:
+    // IDLToCLSCompiler's handling of char constants
+    // fixing bug 841774
+    typedef char LoginSessionMode;
+
+    const LoginSessionMode STAND_ALONE_TEST = '1';
+    const LoginSessionMode NETWORK_TEST = '2';
+    const LoginSessionMode PRODUCTION = '3';
+
+    
+
+    // IDLToCLSCompiler regression test:
+    // constant values not usable in other IDL definitions 
+    // fxing bug 840585
+    const long AVAL = 1;
+
+    const long BVAL = AVAL;
+
+    // IDLToCLSCompiler regression test:
+    // problem with wstring constant values
+    const wstring COMP_NAME_A = L"test";
+    const wstring COMP_NAME_B = L"java:comp/env/ejb/Fibo";
+
+
+	// IDLToCLSCompiler regressino test:
+	// check that "big" unions are compiled without crashing
+	// fixes bug 831611
+
+	enum UnionType2 {
+		TYPE_1,
+		TYPE_2,
+		TYPE_3,
+		TYPE_4,
+		TYPE_5,
+		TYPE_6,
+		TYPE_7,
+		TYPE_8
+	};
+
+	union TestUnion2 switch(UnionType2) {
+		case TYPE_1:	wstring Field1;
+		case TYPE_2:	wstring Field2;
+		case TYPE_3:	wstring Field3;
+		case TYPE_4:	wstring Field4;
+		case TYPE_5:	wstring Field5;
+		case TYPE_6:	wstring Field6;
+		case TYPE_7:	wstring Field7;
+		case TYPE_8:	wstring Field8;
+		default: wstring FieldDefault;
+	};
+	
+	
+	// test for int / float constant values
+	const long long Max_int = 9223372036854775807;
+	const long long Min_int = -9223372036854775808;
+	const long Zero_val = 0;
+	
+	const long Zero_from_hex = 0x0;
+	const long One_from_hex = 0x1;
+	const long Minus_one_from_hex = -0x1;
+	
+	const float Zero_val_float = 0.0f;
+	const float Minus_one_float = -1.0f;
+	const float Plus_one_float = 1.0f;
+	
+	const float Plus_Inf = Infinity;
+	const float Minus_Inf = -Infinity;
+	
+
+	const unsigned short UShort_BiggerThanShort =                        0x8000;
+	const unsigned long ULong_BiggerThanLong =                       0x80000000;
+	const unsigned long long ULongLong_BiggerThanLongLong =  0x8000000000000000;
+	
+	
+        // tests for all const-types in corba 2.x grammar
+        // <const_type> ::= <integer_type>
+
+        const short A_SHORT_CONST = -29;
+        const short VAL_OF_A_SHORT_CONST = A_SHORT_CONST;
+        const long A_LONG_CONST = 30;
+        const long long A_LONG_LONG_CONST = -31;
+
+        const unsigned short A_UNSIGNED_SHORT_CONST = 81;
+        const unsigned long A_UNSIGNED_LONG_CONST = 101;
+        const unsigned long long A_UNSIGNED_LONG_LONG_CONST = 102;
+
+        // | <char_type>
+
+        const char A_CHAR_CONST = 'C';
+        const char VAL_OF_A_CHAR_CONST = A_CHAR_CONST;
+
+        // | <wide_char_type>
+
+        const wchar A_WCHAR_CONST = L'D';
+
+        // | <boolean_type>
+
+        const boolean A_BOOLEAN_CONST_TRUE = TRUE;
+        const boolean A_BOOLEAN_CONST_FALSE = FALSE;
+
+        // | <floating_pt_type>
+
+        const float A_FLOAT_CONST = 1.1f;
+        const double A_DOUBLE_CONST = 6.7e8f;
+        // const long double ... not supported yet
+
+        // | <string_type>
+
+        const string A_STRING_CONST = "test";
+        const string <10> A_STRING_CONST_BOUNDED = "test-b";
+
+        // | <wide_string_type>
+
+        const wstring A_WSTRING_CONST = L"w-test";
+        const wstring <10> A_WSTRING_CONST_BOUNDED = L"w-test-b";
+
+        // | <fixed_pt_const_type>
+
+        // const fixed ... not supported yet        
+
+        // | <scoped_name>
+
+        typedef long LONG_TYPEDEF;
+        const LONG_TYPEDEF SCOPED_NAME_CONST_LONGTD = 10;
+
+        enum A_ENUM_FOR_CONST { CV1, CV2, CV3 };
+        const A_ENUM_FOR_CONST SCOPED_NAME_CONST_ENUM = CV1;
+
+
+        // | <octet_type>
+
+        const octet A_OCTET_CONST = 8;
+        
+	
+};
+};
+};
+};
